@@ -34,12 +34,24 @@ def parse_subject(text):
 
 
 class ConventionalHackNPlanCz(BaseCommitizen):
-    bump_pattern = defaults.bump_pattern
-    bump_map = defaults.bump_map
-    commit_parser = defaults.commit_parser
+    changelog_pattern = r"^(mile|feat|fix|refactor|perf|task)"
+    bump_pattern = r"^(mile|feat|fix|refactor|perf)(\(.+\))?(!)?"
+    bump_map = OrderedDict(
+        (
+            (r"^.+!$", defaults.MAJOR),
+            (r"^mile", defaults.MAJOR),
+            (r"^feat", defaults.MINOR),
+            (r"^fix", defaults.PATCH),
+            (r"^refactor", defaults.PATCH),
+            (r"^perf", defaults.PATCH),
+        )
+    )
+    change_type_order = ["Milestone", "Feature", "Fix", "Refactor", "Perf", "Task"]
+    commit_parser = r"^(?P<change_type>feat|fix|refactor|perf|mile|task)(?:\((?P<scope>[^()\r\n]*)\)|\()?(?P<breaking>!)?:\s(?P<message>.*)?"  # noqa
     version_parser = defaults.version_parser
     change_type_map = {
-        "feat": "Feat",
+        "mile": "Milestone",
+        "feat": "Feature",
         "fix": "Fix",
         "docs": "Documentation",
         "style": "Styling",
@@ -48,6 +60,9 @@ class ConventionalHackNPlanCz(BaseCommitizen):
         "test": "Test",
         "build": "Build",
         "ci": "CI",
+        "task": "Task",
+        "chore": "Chore",
+        "wip": "WIP",
     }
 
     # Read the config file
@@ -81,6 +96,11 @@ class ConventionalHackNPlanCz(BaseCommitizen):
                 "name": "prefix",
                 "message": "Select the type of change you are committing",
                 "choices": [
+                    {
+                        "value": "mile",
+                        "name": "🎯 milestone: A milestone release. Correlates with MAJOR in SemVer",
+                        "key": "m",
+                    },
                     {
                         "value": "fix",
                         "name": "🐛 fix: A bug fix. Correlates with PATCH in SemVer",
@@ -148,6 +168,20 @@ class ConventionalHackNPlanCz(BaseCommitizen):
                         ),
                         "key": "h",
                     },
+                    {
+                        "value": "task",
+                        "name": (
+                            "📥 task: General project task"
+                        ),
+                        "key": "a",
+                    },
+                    {
+                        "value": "wip",
+                        "name": (
+                            "🧰 wip: Work-in-progress"
+                        ),
+                        "key": "w",
+                    },
                 ],
             },
             {
@@ -196,22 +230,30 @@ class ConventionalHackNPlanCz(BaseCommitizen):
             },
         ]
 
-        url = self.hnp_base_url + self.workitems_endpoint.format(projectId=self.projectid)
+        if self.projectid != 0:
+            url = self.hnp_base_url + self.workitems_endpoint.format(projectId=self.projectid)
 
-        headers = {"Authorization": "ApiKey " + str(self.hnp_key)}
+            headers = {"Authorization": "ApiKey " + str(self.hnp_key)}
 
-        r = requests.get(url, headers=headers)
-        response_data = json.loads(r.text)
+            r = requests.get(url, headers=headers)
+            response_data = json.loads(r.text)
 
-        for question in filter(lambda q: q["name"] == "tasks", questions):
-            for task in response_data['items']:
-                if task["isBlocked"] == False:
-                    question["choices"].append(
-                        {
-                            "value": task["workItemId"],
-                            "name": task["title"]
-                        }
-                    )
+            for question in filter(lambda q: q["name"] == "tasks", questions):
+                for task in response_data['items']:
+                    if task["isBlocked"] == False:
+                        question["choices"].append(
+                            {
+                                "value": task["workItemId"],
+                                "name": task["title"]
+                            }
+                        )
+        else:
+            for question in filter(lambda q: q["name"] == "tasks", questions):
+                question["type"] = "input"
+                question["message"] = "Tasks ID(s) separated by spaces (optional):\n"
+                question["filter"] = lambda x: x.strip() if x else ""
+                del(question["choices"])
+
         return questions
 
     def message(self, answers: dict) -> str:
@@ -263,7 +305,7 @@ class ConventionalHackNPlanCz(BaseCommitizen):
 
     def schema_pattern(self) -> str:
         PATTERN = (
-            r"(build|ci|docs|feat|fix|perf|refactor|style|test|chore|revert|bump)"
+            r"(mile|feat|fix|docs|style|refactor|perf|test|build|ci|task|chore|wip|bump)"
             r"(\(\S+\))?!?:(\s.*)"
         )
         return PATTERN
@@ -294,7 +336,7 @@ class ConventionalHackNPlanCz(BaseCommitizen):
     def changelog_message_builder_hook(
         self, parsed_message: dict, commit: git.GitCommit
     ) -> dict:
-        commit_parser = r"^(?P<change_type>feat|fix|refactor|perf|BREAKING CHANGE)(?:\((?P<scope>[^()\r\n]*)\)|\()?(?P<breaking>!)?:\s(?P<message>.*)Tasks: (?P<tasks>.*)?"
+        commit_parser = r"^(?P<change_type>feat|fix|refactor|perf|mile|task)(?:\((?P<scope>[^()\r\n]*)\)|\()?(?P<breaking>!)?:\s(?P<message>.*)Tasks: (?P<tasks>.*)?"
         body_map_pat = re.compile(commit_parser, re.MULTILINE | re.DOTALL)
 
         message = body_map_pat.match(commit.message)
@@ -313,13 +355,21 @@ class ConventionalHackNPlanCz(BaseCommitizen):
                 ]
             )
 
+        m = m.rstrip()
+        lines = m.splitlines()
+        for index, item in enumerate(lines):
+            if index > 0 and len(item) > 0:
+                lines[index] = f"  - {item}"
+            
+        m = '\n'.join(lines)
+
         if self.use_gitlab:
             parsed_message[
                 "message"
-            ] = f"[{rev[:5]}]({self.git_base_url}/{self.git_repo}/-/tree/{commit.rev}) {m}"
+            ] = f"\[[{rev[:5]}]({self.git_base_url}/{self.git_repo}/-/tree/{commit.rev})\] {m}"
         else:
             parsed_message[
                 "message"
-            ] = f"[{rev[:5]}]({self.git_base_url}/{self.git_repo}/commit/{commit.rev}) {m}"
+            ] = f"\[[{rev[:5]}]({self.git_base_url}/{self.git_repo}/commit/{commit.rev})\] {m}"
 
         return parsed_message
