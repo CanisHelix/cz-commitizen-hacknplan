@@ -340,13 +340,19 @@ class ConventionalHackNPlanCz(BaseCommitizen):
         body_map_pat = re.compile(commit_parser, re.MULTILINE | re.DOTALL)
 
         message = body_map_pat.match(commit.message)
-        parsed_body: Dict = message.groupdict()
+        if message is not None:
+            parsed_body: Dict = message.groupdict()
+        else:
+            commit_parser = r"^(?P<change_type>feat|fix|refactor|perf|mile|task)(?:\((?P<scope>[^()\r\n]*)\)|\()?(?P<breaking>!)?:\s(?P<message>.*)"
+            body_map_pat = re.compile(commit_parser, re.MULTILINE | re.DOTALL)
+            message = body_map_pat.match(commit.message)
+            parsed_body: Dict = message.groupdict()
 
         """add gitlab and hacknplan links to the changelog"""
         rev = commit.rev
         m = parsed_body["message"]
         s = parsed_message["scope"]
-        if parsed_body["tasks"]:
+        if "tasks" in parsed_body:
             parsed_message["scope"] = parsed_body["tasks"]
             parsed_message["scope"] = " ".join(
                 [
@@ -360,6 +366,8 @@ class ConventionalHackNPlanCz(BaseCommitizen):
         for index, item in enumerate(lines):
             if index > 0 and len(item) > 0:
                 lines[index] = f"  - {item}"
+            else:
+                del lines[index]
             
         m = '\n'.join(lines)
 
