@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="cz_commitizen_hacknplan",
-    version="0.0.6",
+    version="0.0.7",
     author='Nigel George',
     author_email='nigel.george@shiroikuma.co.uk',
     url='https://github.com/CanisHelix/commitizen_hacknplan',
